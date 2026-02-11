@@ -1,6 +1,8 @@
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
+import axios from 'axios';
 import { 
   Users, 
   Mic, 
@@ -9,8 +11,12 @@ import {
   VideoOff,
   Hand,
   Crown,
-  VolumeX
+  VolumeX,
+  RefreshCw
 } from 'lucide-react';
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND_URL}/api`;
 
 const ParticipantItem = ({ participant, isCurrentUser }) => {
   const isTeacher = participant.role === 'teacher';
