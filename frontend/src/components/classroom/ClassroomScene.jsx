@@ -1,272 +1,267 @@
-import { Suspense, useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { 
-  OrbitControls, 
-  PerspectiveCamera,
-  Environment,
-  Float,
-  Text,
-  Html
-} from '@react-three/drei';
+import { useRef, useMemo, useEffect } from 'react';
 import * as THREE from 'three';
 
-// Floor component with grid pattern
-const Floor = () => {
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-      <planeGeometry args={[50, 50]} />
-      <meshStandardMaterial 
-        color="#0f172a"
-        metalness={0.8}
-        roughness={0.2}
-      />
-    </mesh>
-  );
-};
+// Simple 3D Scene using raw Three.js 
+const ClassroomScene = ({ participants = [], smartboardContent, currentUserId }) => {
+  const containerRef = useRef(null);
+  const sceneRef = useRef(null);
+  const rendererRef = useRef(null);
+  const cameraRef = useRef(null);
+  const avatarMeshes = useRef({});
 
-// Grid helper for futuristic look
-const GridFloor = () => {
-  return (
-    <gridHelper 
-      args={[50, 50, '#1e3a5f', '#0f2847']} 
-      position={[0, 0.01, 0]}
-    />
-  );
-};
+  // Initialize Three.js scene
+  useEffect(() => {
+    if (!containerRef.current) return;
 
-// Smartboard component
-const Smartboard = ({ content, isActive }) => {
-  return (
-    <group position={[0, 3, -8]}>
-      {/* Board frame */}
-      <mesh>
-        <boxGeometry args={[12, 6, 0.2]} />
-        <meshStandardMaterial 
-          color="#0f172a"
-          metalness={0.9}
-          roughness={0.1}
-        />
-      </mesh>
-      
-      {/* Screen */}
-      <mesh position={[0, 0, 0.11]}>
-        <planeGeometry args={[11.5, 5.5]} />
-        <meshStandardMaterial 
-          color={isActive ? "#1e3a5f" : "#0a1628"}
-          emissive={isActive ? "#0ea5e9" : "#000000"}
-          emissiveIntensity={isActive ? 0.1 : 0}
-        />
-      </mesh>
+    // Scene setup
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x020617);
+    scene.fog = new THREE.Fog(0x020617, 15, 50);
+    sceneRef.current = scene;
 
-      {/* Glowing border */}
-      <lineSegments position={[0, 0, 0.12]}>
-        <edgesGeometry args={[new THREE.PlaneGeometry(11.6, 5.6)]} />
-        <lineBasicMaterial color={isActive ? "#0ea5e9" : "#334155"} />
-      </lineSegments>
+    // Camera
+    const camera = new THREE.PerspectiveCamera(
+      50,
+      containerRef.current.clientWidth / containerRef.current.clientHeight,
+      0.1,
+      100
+    );
+    camera.position.set(0, 5, 12);
+    camera.lookAt(0, 2, 0);
+    cameraRef.current = camera;
 
-      {/* Content text */}
-      {isActive && (
-        <Text
-          position={[0, 0, 0.15]}
-          fontSize={0.5}
-          color="#0ea5e9"
-          anchorX="center"
-          anchorY="middle"
-        >
-          Presentation Active
-        </Text>
-      )}
+    // Renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    containerRef.current.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
 
-      {!isActive && (
-        <Text
-          position={[0, 0, 0.15]}
-          fontSize={0.3}
-          color="#64748b"
-          anchorX="center"
-          anchorY="middle"
-        >
-          ORBITAL CLASSROOM
-        </Text>
-      )}
-    </group>
-  );
-};
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+    scene.add(ambientLight);
 
-// Avatar component for participants
-const Avatar = ({ participant, position, isCurrentUser }) => {
-  const color = participant.role === 'teacher' ? '#0ea5e9' : '#d946ef';
-  const glowColor = participant.role === 'teacher' ? '#0ea5e9' : '#d946ef';
-  
-  return (
-    <Float speed={2} rotationIntensity={0.2} floatIntensity={0.3}>
-      <group position={position}>
-        {/* Body */}
-        <mesh position={[0, 0.8, 0]} castShadow>
-          <capsuleGeometry args={[0.3, 0.8, 4, 8]} />
-          <meshStandardMaterial 
-            color={color}
-            metalness={0.6}
-            roughness={0.3}
-            emissive={glowColor}
-            emissiveIntensity={isCurrentUser ? 0.3 : 0.1}
-          />
-        </mesh>
+    const pointLight1 = new THREE.PointLight(0x0ea5e9, 0.8);
+    pointLight1.position.set(10, 10, 10);
+    pointLight1.castShadow = true;
+    scene.add(pointLight1);
 
-        {/* Head */}
-        <mesh position={[0, 1.6, 0]} castShadow>
-          <sphereGeometry args={[0.25, 16, 16]} />
-          <meshStandardMaterial 
-            color={color}
-            metalness={0.6}
-            roughness={0.3}
-            emissive={glowColor}
-            emissiveIntensity={isCurrentUser ? 0.3 : 0.1}
-          />
-        </mesh>
+    const pointLight2 = new THREE.PointLight(0xd946ef, 0.5);
+    pointLight2.position.set(-10, 5, -10);
+    scene.add(pointLight2);
 
-        {/* Hand raised indicator */}
-        {participant.is_hand_raised && (
-          <mesh position={[0.5, 2.2, 0]}>
-            <sphereGeometry args={[0.15, 8, 8]} />
-            <meshStandardMaterial 
-              color="#eab308"
-              emissive="#eab308"
-              emissiveIntensity={0.5}
-            />
-          </mesh>
-        )}
+    // Floor
+    const floorGeometry = new THREE.PlaneGeometry(50, 50);
+    const floorMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0f172a,
+      metalness: 0.8,
+      roughness: 0.2,
+    });
+    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
 
-        {/* Muted indicator */}
-        {participant.is_muted && (
-          <mesh position={[-0.4, 1.6, 0.3]}>
-            <boxGeometry args={[0.1, 0.1, 0.1]} />
-            <meshStandardMaterial 
-              color="#ef4444"
-              emissive="#ef4444"
-              emissiveIntensity={0.5}
-            />
-          </mesh>
-        )}
+    // Grid
+    const gridHelper = new THREE.GridHelper(50, 50, 0x1e3a5f, 0x0f2847);
+    gridHelper.position.y = 0.01;
+    scene.add(gridHelper);
 
-        {/* Name label */}
-        <Html
-          position={[0, 2.3, 0]}
-          center
-          distanceFactor={10}
-          style={{ pointerEvents: 'none' }}
-        >
-          <div className={`
-            px-2 py-1 rounded-md text-xs whitespace-nowrap
-            ${participant.role === 'teacher' 
-              ? 'bg-sky-500/20 text-sky-400 border border-sky-500/50' 
-              : 'bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/50'}
-          `}>
-            {participant.name}
-            {participant.role === 'teacher' && ' (Teacher)'}
-            {isCurrentUser && ' (You)'}
-          </div>
-        </Html>
-      </group>
-    </Float>
-  );
-};
+    // Smartboard
+    const boardGroup = new THREE.Group();
+    boardGroup.position.set(0, 3, -8);
 
-// Ambient particles for atmosphere
-const Particles = () => {
-  const particles = useMemo(() => {
-    const temp = [];
-    for (let i = 0; i < 50; i++) {
-      temp.push({
-        position: [
-          (Math.random() - 0.5) * 40,
-          Math.random() * 10 + 1,
-          (Math.random() - 0.5) * 40
-        ],
-        scale: Math.random() * 0.05 + 0.02
-      });
+    // Board frame
+    const frameGeometry = new THREE.BoxGeometry(12, 6, 0.2);
+    const frameMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0f172a,
+      metalness: 0.9,
+      roughness: 0.1,
+    });
+    const frame = new THREE.Mesh(frameGeometry, frameMaterial);
+    boardGroup.add(frame);
+
+    // Screen
+    const screenGeometry = new THREE.PlaneGeometry(11.5, 5.5);
+    const screenMaterial = new THREE.MeshStandardMaterial({
+      color: 0x1e3a5f,
+      emissive: 0x0ea5e9,
+      emissiveIntensity: 0.05,
+    });
+    const screen = new THREE.Mesh(screenGeometry, screenMaterial);
+    screen.position.z = 0.11;
+    boardGroup.add(screen);
+
+    // Glowing border
+    const borderGeometry = new THREE.EdgesGeometry(new THREE.PlaneGeometry(11.6, 5.6));
+    const borderMaterial = new THREE.LineBasicMaterial({ color: 0x0ea5e9 });
+    const border = new THREE.LineSegments(borderGeometry, borderMaterial);
+    border.position.z = 0.12;
+    boardGroup.add(border);
+
+    scene.add(boardGroup);
+
+    // Particles
+    const particleCount = 50;
+    const particlesGeometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    
+    for (let i = 0; i < particleCount; i++) {
+      positions[i * 3] = (Math.random() - 0.5) * 40;
+      positions[i * 3 + 1] = Math.random() * 10 + 1;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 40;
     }
-    return temp;
+    
+    particlesGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const particlesMaterial = new THREE.PointsMaterial({
+      color: 0x0ea5e9,
+      size: 0.1,
+      transparent: true,
+      opacity: 0.3,
+    });
+    const particles = new THREE.Points(particlesGeometry, particlesMaterial);
+    scene.add(particles);
+
+    // Animation loop
+    let animationId;
+    const animate = () => {
+      animationId = requestAnimationFrame(animate);
+      
+      // Rotate particles slowly
+      particles.rotation.y += 0.0002;
+      
+      // Float avatars
+      Object.values(avatarMeshes.current).forEach((avatarGroup, i) => {
+        if (avatarGroup) {
+          avatarGroup.position.y = Math.sin(Date.now() * 0.001 + i) * 0.1;
+        }
+      });
+      
+      renderer.render(scene, camera);
+    };
+    animate();
+
+    // Handle resize
+    const handleResize = () => {
+      if (!containerRef.current) return;
+      const width = containerRef.current.clientWidth;
+      const height = containerRef.current.clientHeight;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height);
+    };
+    window.addEventListener('resize', handleResize);
+
+    // Cleanup
+    return () => {
+      cancelAnimationFrame(animationId);
+      window.removeEventListener('resize', handleResize);
+      if (containerRef.current && renderer.domElement) {
+        containerRef.current.removeChild(renderer.domElement);
+      }
+      renderer.dispose();
+    };
   }, []);
 
-  return (
-    <group>
-      {particles.map((particle, i) => (
-        <mesh key={i} position={particle.position}>
-          <sphereGeometry args={[particle.scale, 8, 8]} />
-          <meshBasicMaterial color="#0ea5e9" transparent opacity={0.3} />
-        </mesh>
-      ))}
-    </group>
-  );
-};
+  // Update avatars when participants change
+  useEffect(() => {
+    if (!sceneRef.current) return;
 
-// Main classroom scene
-const ClassroomScene = ({ participants = [], smartboardContent, currentUserId }) => {
-  // Calculate avatar positions in a semicircle
-  const getAvatarPosition = (index, total) => {
-    const radius = 6;
-    const angleSpread = Math.PI * 0.8; // 144 degrees spread
-    const startAngle = Math.PI * 0.1; // Start offset
-    
-    if (total === 1) {
-      return [0, 0, 4];
-    }
-    
-    const angle = startAngle + (index / (total - 1)) * angleSpread;
-    const x = Math.cos(angle) * radius - radius / 2;
-    const z = Math.sin(angle) * radius;
-    
-    return [x, 0, z];
-  };
+    // Remove old avatars
+    Object.keys(avatarMeshes.current).forEach(userId => {
+      if (!participants.find(p => p.user_id === userId)) {
+        const avatar = avatarMeshes.current[userId];
+        if (avatar) {
+          sceneRef.current.remove(avatar);
+          delete avatarMeshes.current[userId];
+        }
+      }
+    });
 
-  return (
-    <Canvas shadows dpr={[1, 2]} style={{ background: '#020617' }}>
-      <PerspectiveCamera makeDefault position={[0, 5, 12]} fov={50} />
+    // Add/update avatars
+    participants.forEach((participant, index) => {
+      const isTeacher = participant.role === 'teacher';
+      const isCurrentUser = participant.user_id === currentUserId;
+      const color = isTeacher ? 0x0ea5e9 : 0xd946ef;
       
-      <OrbitControls 
-        enablePan={false}
-        minPolarAngle={Math.PI / 6}
-        maxPolarAngle={Math.PI / 2.2}
-        minDistance={8}
-        maxDistance={20}
-        target={[0, 2, 0]}
-      />
+      // Calculate position in semicircle
+      const getPosition = (idx, total) => {
+        const radius = 6;
+        const angleSpread = Math.PI * 0.8;
+        const startAngle = Math.PI * 0.1;
+        
+        if (total === 1) return [0, 0, 4];
+        
+        const angle = startAngle + (idx / (total - 1)) * angleSpread;
+        const x = Math.cos(angle) * radius - radius / 2;
+        const z = Math.sin(angle) * radius;
+        
+        return [x, 0, z];
+      };
 
-      {/* Lighting */}
-      <ambientLight intensity={0.3} />
-      <pointLight position={[10, 10, 10]} intensity={0.8} color="#0ea5e9" castShadow />
-      <pointLight position={[-10, 5, -10]} intensity={0.5} color="#d946ef" />
-      <spotLight
-        position={[0, 10, 0]}
-        angle={0.3}
-        penumbra={1}
-        intensity={0.5}
-        castShadow
-      />
+      const [x, y, z] = getPosition(index, participants.length);
 
-      {/* Fog for depth */}
-      <fog attach="fog" args={['#020617', 15, 40]} />
+      if (!avatarMeshes.current[participant.user_id]) {
+        // Create new avatar
+        const avatarGroup = new THREE.Group();
 
-      <Suspense fallback={null}>
-        {/* Environment */}
-        <Floor />
-        <GridFloor />
-        <Particles />
+        // Body (capsule-like)
+        const bodyGeometry = new THREE.CapsuleGeometry(0.3, 0.8, 4, 8);
+        const bodyMaterial = new THREE.MeshStandardMaterial({
+          color: color,
+          metalness: 0.6,
+          roughness: 0.3,
+          emissive: color,
+          emissiveIntensity: isCurrentUser ? 0.3 : 0.1,
+        });
+        const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+        body.position.y = 0.8;
+        body.castShadow = true;
+        avatarGroup.add(body);
 
-        {/* Smartboard */}
-        <Smartboard content={smartboardContent} isActive={!!smartboardContent} />
+        // Head
+        const headGeometry = new THREE.SphereGeometry(0.25, 16, 16);
+        const head = new THREE.Mesh(headGeometry, bodyMaterial);
+        head.position.y = 1.6;
+        head.castShadow = true;
+        avatarGroup.add(head);
 
-        {/* Participants */}
-        {participants.map((participant, index) => (
-          <Avatar
-            key={participant.user_id}
-            participant={participant}
-            position={getAvatarPosition(index, participants.length)}
-            isCurrentUser={participant.user_id === currentUserId}
-          />
-        ))}
-      </Suspense>
-    </Canvas>
+        avatarGroup.position.set(x, y, z);
+        sceneRef.current.add(avatarGroup);
+        avatarMeshes.current[participant.user_id] = avatarGroup;
+      } else {
+        // Update position
+        avatarMeshes.current[participant.user_id].position.set(x, y, z);
+      }
+
+      // Update hand raised indicator
+      const avatarGroup = avatarMeshes.current[participant.user_id];
+      const existingHand = avatarGroup.getObjectByName('handIndicator');
+      
+      if (participant.is_hand_raised && !existingHand) {
+        const handGeometry = new THREE.SphereGeometry(0.15, 8, 8);
+        const handMaterial = new THREE.MeshStandardMaterial({
+          color: 0xeab308,
+          emissive: 0xeab308,
+          emissiveIntensity: 0.5,
+        });
+        const hand = new THREE.Mesh(handGeometry, handMaterial);
+        hand.position.set(0.5, 2.2, 0);
+        hand.name = 'handIndicator';
+        avatarGroup.add(hand);
+      } else if (!participant.is_hand_raised && existingHand) {
+        avatarGroup.remove(existingHand);
+      }
+    });
+  }, [participants, currentUserId]);
+
+  return (
+    <div 
+      ref={containerRef} 
+      className="w-full h-full"
+      style={{ touchAction: 'none' }}
+    />
   );
 };
 
