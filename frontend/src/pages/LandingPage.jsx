@@ -197,7 +197,7 @@ const LandingPage = () => {
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="relative glass-panel rounded-2xl p-8 w-full max-w-md"
+              className="relative z-10 glass-panel rounded-2xl p-8 w-full max-w-md"
               data-testid="auth-modal"
             >
               <button
