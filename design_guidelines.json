@@ -1,0 +1,132 @@
+{
+  "brand_identity": {
+    "name": "Orbital Classroom",
+    "metaphor": "The Command Deck",
+    "tone": "Futuristic, Immersive, Professional, High-Precision",
+    "archetype": "The Architect (Structure + Vision)"
+  },
+  "colors": {
+    "palette": {
+      "background": {
+        "default": "#020617",
+        "paper": "#0f172a",
+        "void": "#000000"
+      },
+      "primary": {
+        "main": "#0ea5e9",
+        "light": "#38bdf8",
+        "dark": "#0284c7",
+        "glow": "rgba(14, 165, 233, 0.5)"
+      },
+      "secondary": {
+        "main": "#d946ef",
+        "light": "#e879f9",
+        "dark": "#c026d3",
+        "glow": "rgba(217, 70, 239, 0.5)"
+      },
+      "status": {
+        "success": "#22c55e",
+        "warning": "#eab308",
+        "error": "#ef4444",
+        "info": "#3b82f6"
+      },
+      "text": {
+        "primary": "#f8fafc",
+        "secondary": "#94a3b8",
+        "muted": "#64748b"
+      }
+    },
+    "gradients": {
+      "primary": "linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%)",
+      "hologram": "linear-gradient(180deg, rgba(14, 165, 233, 0) 0%, rgba(14, 165, 233, 0.1) 50%, rgba(14, 165, 233, 0.05) 100%)"
+    }
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Orbitron, Rajdhani, Space Grotesk, sans-serif",
+      "body": "Inter, system-ui, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "scale": {
+      "h1": "text-5xl font-bold tracking-tighter",
+      "h2": "text-3xl font-semibold tracking-tight",
+      "h3": "text-2xl font-medium tracking-normal",
+      "body": "text-base leading-relaxed",
+      "caption": "text-xs uppercase tracking-widest text-muted-foreground"
+    }
+  },
+  "layout": {
+    "grid_system": "The HUD Grid",
+    "structure": {
+      "main_view": "absolute inset-0 z-0 overflow-hidden bg-slate-950",
+      "ui_layer": "relative z-10 grid h-screen grid-rows-[auto_1fr_auto] pointer-events-none",
+      "header": "pointer-events-auto flex items-center justify-between px-6 py-4 glass-panel-top",
+      "content_area": "grid grid-cols-[1fr_auto] gap-4 px-6 overflow-hidden",
+      "controls_bar": "pointer-events-auto mx-auto mb-6 flex items-center gap-4 rounded-full glass-panel-float px-6 py-3"
+    },
+    "spacing": {
+      "container_padding": "p-6 md:p-8",
+      "gap_default": "gap-4",
+      "gap_wide": "gap-8"
+    }
+  },
+  "components": {
+    "glass_panel": {
+      "base": "bg-slate-950/70 backdrop-blur-xl border border-white/10 shadow-2xl",
+      "hover": "hover:bg-slate-900/80 hover:border-white/20 transition-all duration-300"
+    },
+    "neon_button": {
+      "primary": "bg-sky-500/10 text-sky-400 border border-sky-500/50 hover:bg-sky-500/20 hover:shadow-[0_0_15px_rgba(14,165,233,0.4)] active:scale-95 transition-all",
+      "danger": "bg-red-500/10 text-red-400 border border-red-500/50 hover:bg-red-500/20 hover:shadow-[0_0_15px_rgba(239,68,68,0.4)] active:scale-95 transition-all",
+      "ghost": "hover:bg-white/5 text-slate-300 hover:text-white transition-colors"
+    },
+    "holographic_card": {
+      "style": "relative overflow-hidden rounded-xl border border-sky-500/20 bg-slate-900/50 backdrop-blur-sm",
+      "effect": "after:absolute after:inset-0 after:bg-gradient-to-b after:from-sky-500/5 after:to-transparent after:pointer-events-none"
+    }
+  },
+  "3d_scene": {
+    "library": "react-three-fiber",
+    "environment": {
+      "type": "Holographic Simulation",
+      "background": "#020617",
+      "fog": "fog(0x020617, 10, 50)",
+      "grid": "InfiniteGridHelper with fade distance 30, color #1e293b"
+    },
+    "objects": {
+      "floor": "ReflectorPlane with blur and mixStrength for glossy look",
+      "smartboard": "Floating PlaneGeometry with VideoTexture (screen share content). Add glowing borders.",
+      "avatars": "CapsuleGeometry for body, SphereGeometry for head. Floating Html label for names.",
+      "lighting": "AmbientLight (0.5), PointLight (cyan, position=[10,10,10]), PointLight (magenta, position=[-10,5,-10])"
+    },
+    "camera": {
+      "default": "PerspectiveCamera, position=[0, 5, 10], fov=50",
+      "controls": "OrbitControls (limited polar angle to prevent going under floor)"
+    }
+  },
+  "assets": {
+    "images": [
+      {
+        "category": "background",
+        "url": "https://images.unsplash.com/photo-1757705759352-a387d4cb1154?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2ODl8MHwxfHNlYXJjaHwxfHxjeWJlcnB1bmslMjBjaXR5JTIwc2t5bGluZSUyMG5pZ2h0JTIwcGFub3JhbWljfGVufDB8fHx8MTc3MDc4NTE3MXww&ixlib=rb-4.1.0&q=85",
+        "description": "Cyberpunk City Skyline - Use for Login Page Background or Skybox"
+      },
+      {
+        "category": "texture",
+        "url": "https://images.unsplash.com/photo-1649182784901-48f5f2d40ecc?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzV8MHwxfHNlYXJjaHwxfHxodWQlMjBpbnRlcmZhY2UlMjBvdmVybGF5JTIwdGV4dHVyZSUyMGJsYWNrJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3NzA3ODUxNjZ8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract HUD Waves - Use for overlay on loading screens or panels"
+      }
+    ],
+    "icons": "lucide-react (Use thin strokes 'stroke-1' for futuristic look)"
+  },
+  "universal_guidelines": [
+    "Use 'backdrop-blur-xl' for all floating panels to ensure 3D scene visibility.",
+    "Avoid solid opaque backgrounds in the main view. Immersion is key.",
+    "Use 'data-testid' for all interactive elements.",
+    "Animations should be 'ease-out-expo' for a snappy, robotic feel.",
+    "Do not use default scrollbars. Hide them or style them thin and dark.",
+    "Ensure text contrast is high (White on Dark Glass).",
+    "Use 'sonner' for notifications with a dark theme."
+  ],
+  "instructions_to_main_agent": "1. Install 'three', '@react-three/fiber', '@react-three/drei', 'lucide-react', 'framer-motion', 'clsx', 'tailwind-merge'. 2. Set up the 3D Canvas in the main layout. 3. Build the 'GlassPanel' component as the base for all UI. 4. Implement the 'Holographic' aesthetic using the specified colors and borders. 5. Ensure the 3D scene is performant (use instances if many objects, but for MVP simple meshes are fine)."
+}
