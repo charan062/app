@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 import jwt
 import bcrypt
-import redis.asyncio as redis
+from livekit import api
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -29,9 +29,13 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Redis connection (optional, fallback to in-memory if not available)
-redis_client = None
-room_states = {}  # In-memory fallback for room states
+# LiveKit Configuration
+LIVEKIT_URL = os.environ.get('LIVEKIT_URL', '')
+LIVEKIT_API_KEY = os.environ.get('LIVEKIT_API_KEY', '')
+LIVEKIT_API_SECRET = os.environ.get('LIVEKIT_API_SECRET', '')
+
+# In-memory room states for Socket.IO signaling
+room_states = {}
 
 # JWT Configuration
 JWT_SECRET = os.environ.get('JWT_SECRET', 'orbital-classroom-secret-key-change-in-production')
@@ -78,12 +82,21 @@ class RoomResponse(BaseModel):
 class RoomJoin(BaseModel):
     code: str
 
+class LiveKitTokenRequest(BaseModel):
+    room_id: str
+
+class LiveKitTokenResponse(BaseModel):
+    token: str
+    server_url: str
+    participant_identity: str
+    participant_name: str
+
 class ParticipantResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     user_id: str
     name: str
-    role: str  # 'teacher' or 'student'
+    role: str
     is_muted: bool
     is_video_on: bool
     is_hand_raised: bool
@@ -114,7 +127,7 @@ def create_token(user_id: str, email: str, name: str) -> str:
         'user_id': user_id,
         'email': email,
         'name': name,
-        'exp': datetime.now(timezone.utc).timestamp() + (24 * 60 * 60)  # 24 hours
+        'exp': datetime.now(timezone.utc).timestamp() + (24 * 60 * 60)
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
@@ -131,11 +144,31 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 def generate_room_code() -> str:
     return str(uuid.uuid4())[:8].upper()
 
+def create_livekit_token(room_name: str, participant_identity: str, participant_name: str, is_teacher: bool) -> str:
+    """Generate LiveKit access token with role-based permissions."""
+    token = api.AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+    token.with_identity(participant_identity)
+    token.with_name(participant_name)
+    
+    # Grant permissions based on role
+    grant = api.VideoGrants(
+        room_join=True,
+        room=room_name,
+        can_publish=True,
+        can_subscribe=True,
+        can_publish_data=True,
+        room_admin=is_teacher,  # Teachers can manage the room
+    )
+    
+    token.with_grants(grant)
+    token.with_ttl(datetime.timedelta(hours=6))  # 6 hour validity
+    
+    return token.to_jwt()
+
 # ==================== AUTH ROUTES ====================
 
 @fastapi_app.post("/api/auth/register", response_model=dict)
 async def register(user: UserCreate):
-    # Check if user exists
     existing = await db.users.find_one({"email": user.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -190,11 +223,13 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 async def create_room(room: RoomCreate, current_user: dict = Depends(get_current_user)):
     room_id = str(uuid.uuid4())
     room_code = generate_room_code()
+    livekit_room_name = f"orbital-{room_code.lower()}"
     
     room_doc = {
         "id": room_id,
         "name": room.name,
         "code": room_code,
+        "livekit_room_name": livekit_room_name,
         "host_id": current_user["user_id"],
         "host_name": current_user["name"],
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -202,7 +237,7 @@ async def create_room(room: RoomCreate, current_user: dict = Depends(get_current
     }
     await db.rooms.insert_one(room_doc)
     
-    # Initialize room state
+    # Initialize room state for signaling
     room_states[room_id] = {
         "participants": {},
         "messages": [],
@@ -225,6 +260,182 @@ async def get_room(room_id: str, current_user: dict = Depends(get_current_user))
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     return RoomResponse(**room)
+
+# ==================== LIVEKIT TOKEN ROUTES ====================
+
+@fastapi_app.post("/api/livekit/token", response_model=LiveKitTokenResponse)
+async def get_livekit_token(request: LiveKitTokenRequest, current_user: dict = Depends(get_current_user)):
+    """Generate LiveKit access token for joining a room with real audio/video."""
+    room = await db.rooms.find_one({"id": request.room_id}, {"_id": 0})
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    is_teacher = room["host_id"] == current_user["user_id"]
+    participant_identity = current_user["user_id"]
+    participant_name = current_user["name"]
+    livekit_room_name = room.get("livekit_room_name", f"orbital-{room['code'].lower()}")
+    
+    # Generate LiveKit token
+    livekit_token = create_livekit_token(
+        room_name=livekit_room_name,
+        participant_identity=participant_identity,
+        participant_name=participant_name,
+        is_teacher=is_teacher
+    )
+    
+    return LiveKitTokenResponse(
+        token=livekit_token,
+        server_url=LIVEKIT_URL,
+        participant_identity=participant_identity,
+        participant_name=participant_name
+    )
+
+# ==================== TEACHER CONTROL ROUTES ====================
+
+@fastapi_app.post("/api/rooms/{room_id}/mute-all")
+async def mute_all_students(room_id: str, current_user: dict = Depends(get_current_user)):
+    """Mute all student microphones at the LiveKit media level."""
+    room = await db.rooms.find_one({"id": room_id}, {"_id": 0})
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    if room["host_id"] != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Only teacher can mute all")
+    
+    livekit_room_name = room.get("livekit_room_name", f"orbital-{room['code'].lower()}")
+    
+    try:
+        lkapi = api.LiveKitAPI(
+            url=LIVEKIT_URL.replace("wss://", "https://").replace("ws://", "http://"),
+            api_key=LIVEKIT_API_KEY,
+            api_secret=LIVEKIT_API_SECRET
+        )
+        
+        # Get list of participants
+        participants_response = await lkapi.room.list_participants(
+            api.ListParticipantsRequest(room=livekit_room_name)
+        )
+        
+        muted_count = 0
+        teacher_id = current_user["user_id"]
+        
+        for participant in participants_response.participants:
+            # Skip the teacher
+            if participant.identity == teacher_id:
+                continue
+            
+            # Mute all audio tracks for this participant
+            for track in participant.tracks:
+                if track.type == api.TrackType.AUDIO:
+                    await lkapi.room.mute_published_track(
+                        api.MuteRoomTrackRequest(
+                            room=livekit_room_name,
+                            identity=participant.identity,
+                            track_sid=track.sid,
+                            muted=True
+                        )
+                    )
+                    muted_count += 1
+        
+        await lkapi.aclose()
+        
+        # Notify via Socket.IO
+        await sio.emit('all_muted', {"room_id": room_id}, room=room_id)
+        
+        return {
+            "success": True,
+            "message": f"Muted {muted_count} audio tracks",
+            "muted_count": muted_count
+        }
+    
+    except Exception as e:
+        logger.error(f"Failed to mute all: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to mute: {str(e)}")
+
+@fastapi_app.post("/api/rooms/{room_id}/unmute-participant/{participant_id}")
+async def unmute_participant(room_id: str, participant_id: str, current_user: dict = Depends(get_current_user)):
+    """Unmute a specific participant's microphone."""
+    room = await db.rooms.find_one({"id": room_id}, {"_id": 0})
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    if room["host_id"] != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Only teacher can unmute participants")
+    
+    livekit_room_name = room.get("livekit_room_name", f"orbital-{room['code'].lower()}")
+    
+    try:
+        lkapi = api.LiveKitAPI(
+            url=LIVEKIT_URL.replace("wss://", "https://").replace("ws://", "http://"),
+            api_key=LIVEKIT_API_KEY,
+            api_secret=LIVEKIT_API_SECRET
+        )
+        
+        participant = await lkapi.room.get_participant(
+            api.RoomParticipantIdentity(room=livekit_room_name, identity=participant_id)
+        )
+        
+        for track in participant.tracks:
+            if track.type == api.TrackType.AUDIO:
+                await lkapi.room.mute_published_track(
+                    api.MuteRoomTrackRequest(
+                        room=livekit_room_name,
+                        identity=participant_id,
+                        track_sid=track.sid,
+                        muted=False
+                    )
+                )
+        
+        await lkapi.aclose()
+        return {"success": True, "message": "Participant unmuted"}
+    
+    except Exception as e:
+        logger.error(f"Failed to unmute: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to unmute: {str(e)}")
+
+@fastapi_app.get("/api/rooms/{room_id}/livekit-participants")
+async def get_livekit_participants(room_id: str, current_user: dict = Depends(get_current_user)):
+    """Get real-time participant list from LiveKit."""
+    room = await db.rooms.find_one({"id": room_id}, {"_id": 0})
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    livekit_room_name = room.get("livekit_room_name", f"orbital-{room['code'].lower()}")
+    
+    try:
+        lkapi = api.LiveKitAPI(
+            url=LIVEKIT_URL.replace("wss://", "https://").replace("ws://", "http://"),
+            api_key=LIVEKIT_API_KEY,
+            api_secret=LIVEKIT_API_SECRET
+        )
+        
+        participants_response = await lkapi.room.list_participants(
+            api.ListParticipantsRequest(room=livekit_room_name)
+        )
+        
+        await lkapi.aclose()
+        
+        participants = []
+        for p in participants_response.participants:
+            is_muted = True
+            for track in p.tracks:
+                if track.type == api.TrackType.AUDIO and not track.muted:
+                    is_muted = False
+                    break
+            
+            participants.append({
+                "identity": p.identity,
+                "name": p.name,
+                "is_muted": is_muted,
+                "is_teacher": p.identity == room["host_id"],
+                "joined_at": p.joined_at
+            })
+        
+        return {"participants": participants}
+    
+    except Exception as e:
+        logger.error(f"Failed to get participants: {e}")
+        return {"participants": []}
 
 @fastapi_app.get("/api/rooms/{room_id}/participants", response_model=List[ParticipantResponse])
 async def get_participants(room_id: str, current_user: dict = Depends(get_current_user)):
@@ -250,10 +461,21 @@ async def end_room(room_id: str, current_user: dict = Depends(get_current_user))
     
     await db.rooms.update_one({"id": room_id}, {"$set": {"is_active": False}})
     
-    # Notify all participants
+    # Delete LiveKit room
+    livekit_room_name = room.get("livekit_room_name", f"orbital-{room['code'].lower()}")
+    try:
+        lkapi = api.LiveKitAPI(
+            url=LIVEKIT_URL.replace("wss://", "https://").replace("ws://", "http://"),
+            api_key=LIVEKIT_API_KEY,
+            api_secret=LIVEKIT_API_SECRET
+        )
+        await lkapi.room.delete_room(api.DeleteRoomRequest(room=livekit_room_name))
+        await lkapi.aclose()
+    except Exception as e:
+        logger.warning(f"Failed to delete LiveKit room: {e}")
+    
     await sio.emit('room_ended', {"room_id": room_id}, room=room_id)
     
-    # Clean up room state
     if room_id in room_states:
         del room_states[room_id]
     
@@ -272,7 +494,6 @@ async def connect(sid, environ):
 @sio.event
 async def disconnect(sid):
     logger.info(f"Client disconnected: {sid}")
-    # Remove participant from any room they were in
     for room_id, state in room_states.items():
         for user_id, participant in list(state["participants"].items()):
             if participant.get("sid") == sid:
@@ -290,12 +511,10 @@ async def join_room(sid, data):
     name = data.get("name")
     
     if not room_id or not user_id:
-        logger.warning(f"join_room called without room_id or user_id for {sid}")
         return
     
     await sio.enter_room(sid, room_id)
     
-    # Initialize room state if not exists
     if room_id not in room_states:
         room_states[room_id] = {
             "participants": {},
@@ -303,11 +522,9 @@ async def join_room(sid, data):
             "smartboard_content": None
         }
     
-    # Check if user is host (teacher) or student
     room = await db.rooms.find_one({"id": room_id}, {"_id": 0})
     role = "teacher" if room and room.get("host_id") == user_id else "student"
     
-    # Add participant
     participant = {
         "id": str(uuid.uuid4()),
         "user_id": user_id,
@@ -321,12 +538,7 @@ async def join_room(sid, data):
     }
     room_states[room_id]["participants"][user_id] = participant
     
-    logger.info(f"User {name} ({user_id}) joined room {room_id} as {role}")
-    
-    # Notify all participants in the room
     await sio.emit('participant_joined', participant, room=room_id)
-    
-    # Send current state to the new participant
     await sio.emit('room_state', {
         "participants": list(room_states[room_id]["participants"].values()),
         "smartboard_content": room_states[room_id]["smartboard_content"]
@@ -407,24 +619,19 @@ async def send_message(sid, data):
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
-    # Store in database
     await db.messages.insert_one(message.copy())
-    
-    # Broadcast to room
     await sio.emit('new_message', message, room=room_id)
 
 @sio.event
 async def start_presenting(sid, data):
     room_id = data.get("room_id")
     user_id = data.get("user_id")
-    content_url = data.get("content_url")  # Could be screen share URL or slide URL
+    content_url = data.get("content_url")
     
     if room_id in room_states:
-        # Stop any current presenter
         for uid, p in room_states[room_id]["participants"].items():
             p["is_presenting"] = False
         
-        # Set new presenter
         if user_id in room_states[room_id]["participants"]:
             room_states[room_id]["participants"][user_id]["is_presenting"] = True
             room_states[room_id]["smartboard_content"] = content_url
@@ -445,19 +652,16 @@ async def stop_presenting(sid, data):
             room_states[room_id]["participants"][user_id]["is_presenting"] = False
         room_states[room_id]["smartboard_content"] = None
         
-        await sio.emit('presentation_stopped', {
-            "user_id": user_id
-        }, room=room_id)
+        await sio.emit('presentation_stopped', {"user_id": user_id}, room=room_id)
 
 @sio.event
 async def mute_all(sid, data):
-    """Teacher-only: Mute all students"""
     room_id = data.get("room_id")
     host_id = data.get("host_id")
     
     room = await db.rooms.find_one({"id": room_id}, {"_id": 0})
     if not room or room["host_id"] != host_id:
-        return  # Only host can mute all
+        return
     
     if room_id in room_states:
         for user_id, participant in room_states[room_id]["participants"].items():
@@ -478,7 +682,6 @@ fastapi_app.add_middleware(
     allow_headers=["*"],
 )
 
-# Wrap FastAPI with Socket.IO
 socket_app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app, socketio_path='/api/socket.io')
 app = socket_app
 
