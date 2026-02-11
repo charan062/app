@@ -259,6 +259,106 @@ class OrbitalClassroomTester:
         
         return success
 
+    def test_livekit_token(self):
+        """Test LiveKit token generation"""
+        print("\n🔍 Testing LiveKit Token Generation...")
+        if not self.room_id:
+            self.log_test("LiveKit Token", False, "No room ID available")
+            return False
+            
+        token_data = {
+            "room_id": self.room_id
+        }
+        
+        success, response = self.run_api_test(
+            "LiveKit Token",
+            "POST",
+            "livekit/token",
+            200,
+            data=token_data
+        )
+        
+        if success:
+            # Validate response structure
+            required_fields = ['token', 'server_url', 'participant_identity', 'participant_name']
+            missing_fields = [field for field in required_fields if field not in response]
+            
+            if missing_fields:
+                self.log_test("LiveKit Token Validation", False, f"Missing fields: {missing_fields}")
+                return False
+            
+            # Check if server_url matches expected LiveKit URL
+            expected_url = "wss://classroom-3ntn08k8.livekit.cloud"
+            if response.get('server_url') != expected_url:
+                self.log_test("LiveKit Token Validation", False, f"Server URL mismatch: {response.get('server_url')}")
+                return False
+            
+            print(f"   Token generated for: {response.get('participant_name')}")
+            print(f"   Server URL: {response.get('server_url')}")
+            print(f"   Participant ID: {response.get('participant_identity')}")
+            
+            self.log_test("LiveKit Token Validation", True, "All required fields present")
+        
+        return success
+
+    def test_mute_all_endpoint(self):
+        """Test teacher mute-all functionality"""
+        print("\n🔍 Testing Mute All Endpoint...")
+        if not self.room_id:
+            self.log_test("Mute All", False, "No room ID available")
+            return False
+            
+        success, response = self.run_api_test(
+            "Mute All",
+            "POST",
+            f"rooms/{self.room_id}/mute-all",
+            200
+        )
+        
+        if success:
+            # Validate response structure
+            if 'success' in response and 'muted_count' in response:
+                print(f"   Muted count: {response.get('muted_count', 0)}")
+                print(f"   Message: {response.get('message', 'N/A')}")
+                self.log_test("Mute All Response Validation", True, "Response structure valid")
+            else:
+                self.log_test("Mute All Response Validation", False, "Invalid response structure")
+                return False
+        
+        return success
+
+    def test_get_livekit_participants(self):
+        """Test LiveKit participants endpoint"""
+        print("\n🔍 Testing LiveKit Participants...")
+        if not self.room_id:
+            self.log_test("LiveKit Participants", False, "No room ID available")
+            return False
+            
+        success, response = self.run_api_test(
+            "LiveKit Participants",
+            "GET",
+            f"rooms/{self.room_id}/livekit-participants",
+            200
+        )
+        
+        if success:
+            participants = response.get('participants', [])
+            print(f"   LiveKit participants count: {len(participants)}")
+            
+            # Validate participant structure if any exist
+            if participants:
+                participant = participants[0]
+                required_fields = ['identity', 'name', 'is_muted', 'is_teacher']
+                missing_fields = [field for field in required_fields if field not in participant]
+                
+                if missing_fields:
+                    self.log_test("LiveKit Participants Validation", False, f"Missing fields: {missing_fields}")
+                    return False
+                
+                self.log_test("LiveKit Participants Validation", True, "Participant structure valid")
+        
+        return success
+
     def setup_socket_client(self):
         """Setup Socket.IO client for testing"""
         try:
