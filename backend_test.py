@@ -502,6 +502,9 @@ class OrbitalClassroomTester:
             self.test_get_room,
             self.test_get_participants,
             self.test_get_messages,
+            self.test_livekit_token,
+            self.test_mute_all_endpoint,
+            self.test_get_livekit_participants,
         ]
         
         # Run API tests
