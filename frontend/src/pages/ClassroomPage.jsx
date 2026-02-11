@@ -5,11 +5,12 @@ import { useAuth } from '@/context/AuthContext';
 import { useSocket } from '@/context/SocketContext';
 import { toast } from 'sonner';
 
-import ClassroomScene from '@/components/classroom/ClassroomScene';
-import ControlBar from '@/components/classroom/ControlBar';
+import LiveKitVideo from '@/components/classroom/LiveKitVideo';
 import ParticipantsPanel from '@/components/classroom/ParticipantsPanel';
 import ChatPanel from '@/components/classroom/ChatPanel';
 import RoomHeader from '@/components/classroom/RoomHeader';
+import { Button } from '@/components/ui/button';
+import { Hand, MessageSquare } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -26,54 +27,60 @@ const ClassroomPage = () => {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // LiveKit state
+  const [livekitToken, setLivekitToken] = useState(null);
+  const [livekitUrl, setLivekitUrl] = useState(null);
+
   // Local user state
-  const [isMuted, setIsMuted] = useState(true);
-  const [isVideoOn, setIsVideoOn] = useState(false);
   const [isHandRaised, setIsHandRaised] = useState(false);
-  const [isPresenting, setIsPresenting] = useState(false);
 
   // UI state
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [smartboardContent, setSmartboardContent] = useState(null);
+  const [isPanelOpen, setIsPanelOpen] = useState(true);
 
   // Determine if user is teacher
   const isTeacher = room?.host_id === user?.id;
 
-  // Fetch room data
+  // Fetch room data and LiveKit token
   useEffect(() => {
-    const fetchRoom = async () => {
+    const fetchRoomAndToken = async () => {
       try {
-        const [roomRes, messagesRes] = await Promise.all([
-          axios.get(`${API}/rooms/${roomId}`),
-          axios.get(`${API}/rooms/${roomId}/messages`)
-        ]);
+        // Fetch room details
+        const roomRes = await axios.get(`${API}/rooms/${roomId}`);
         setRoom(roomRes.data);
+
+        // Fetch LiveKit token
+        const tokenRes = await axios.post(`${API}/livekit/token`, { room_id: roomId });
+        setLivekitToken(tokenRes.data.token);
+        setLivekitUrl(tokenRes.data.server_url);
+
+        // Fetch messages
+        const messagesRes = await axios.get(`${API}/rooms/${roomId}/messages`);
         setMessages(messagesRes.data);
+
         setLoading(false);
       } catch (error) {
+        console.error('Failed to load classroom:', error);
         toast.error('Failed to load classroom');
         navigate('/dashboard');
       }
     };
 
-    fetchRoom();
+    fetchRoomAndToken();
   }, [roomId, navigate]);
 
-  // Socket connection
+  // Socket connection for signaling (chat, hand raise, etc.)
   useEffect(() => {
     if (!connected || !user || !room) return;
 
-    // Join the room
     emit('join_room', {
       room_id: roomId,
       user_id: user.id,
       name: user.name
     });
 
-    // Socket event handlers
     const handleRoomState = (data) => {
       setParticipants(data.participants || []);
-      setSmartboardContent(data.smartboard_content);
     };
 
     const handleParticipantJoined = (participant) => {
@@ -83,13 +90,13 @@ const ClassroomPage = () => {
         return [...prev, participant];
       });
       if (participant.user_id !== user.id) {
-        toast.info(`${participant.name} joined the classroom`);
+        toast.info(`${participant.name} joined`);
       }
     };
 
     const handleParticipantLeft = (data) => {
       setParticipants(prev => prev.filter(p => p.user_id !== data.user_id));
-      toast.info(`${data.name} left the classroom`);
+      toast.info(`${data.name} left`);
     };
 
     const handleParticipantUpdated = (data) => {
@@ -108,18 +115,8 @@ const ClassroomPage = () => {
       setMessages(prev => [...prev, message]);
     };
 
-    const handlePresentationStarted = (data) => {
-      setSmartboardContent(data.content_url);
-      toast.info(`${data.name} started presenting`);
-    };
-
-    const handlePresentationStopped = () => {
-      setSmartboardContent(null);
-    };
-
     const handleAllMuted = () => {
       if (!isTeacher) {
-        setIsMuted(true);
         toast.info('The teacher muted all students');
       }
     };
@@ -129,69 +126,34 @@ const ClassroomPage = () => {
       navigate('/dashboard');
     };
 
-    // Subscribe to events
     on('room_state', handleRoomState);
     on('participant_joined', handleParticipantJoined);
     on('participant_left', handleParticipantLeft);
     on('participant_updated', handleParticipantUpdated);
     on('hand_raised', handleHandRaised);
     on('new_message', handleNewMessage);
-    on('presentation_started', handlePresentationStarted);
-    on('presentation_stopped', handlePresentationStopped);
     on('all_muted', handleAllMuted);
     on('room_ended', handleRoomEnded);
 
     return () => {
-      // Leave room on unmount
       emit('leave_room', { room_id: roomId, user_id: user.id });
-      
-      // Unsubscribe from events
       off('room_state', handleRoomState);
       off('participant_joined', handleParticipantJoined);
       off('participant_left', handleParticipantLeft);
       off('participant_updated', handleParticipantUpdated);
       off('hand_raised', handleHandRaised);
       off('new_message', handleNewMessage);
-      off('presentation_started', handlePresentationStarted);
-      off('presentation_stopped', handlePresentationStopped);
       off('all_muted', handleAllMuted);
       off('room_ended', handleRoomEnded);
     };
   }, [connected, user, room, roomId, emit, on, off, navigate, isTeacher]);
 
-  // Control handlers
-  const toggleMute = useCallback(() => {
-    const newState = !isMuted;
-    setIsMuted(newState);
-    emit('toggle_mute', { room_id: roomId, user_id: user.id, is_muted: newState });
-  }, [isMuted, emit, roomId, user]);
-
-  const toggleVideo = useCallback(() => {
-    const newState = !isVideoOn;
-    setIsVideoOn(newState);
-    emit('toggle_video', { room_id: roomId, user_id: user.id, is_video_on: newState });
-  }, [isVideoOn, emit, roomId, user]);
-
+  // Handlers
   const toggleHand = useCallback(() => {
     const newState = !isHandRaised;
     setIsHandRaised(newState);
     emit('raise_hand', { room_id: roomId, user_id: user.id, is_hand_raised: newState });
   }, [isHandRaised, emit, roomId, user]);
-
-  const togglePresent = useCallback(() => {
-    if (isPresenting) {
-      setIsPresenting(false);
-      emit('stop_presenting', { room_id: roomId, user_id: user.id });
-    } else {
-      setIsPresenting(true);
-      // For demo, using a placeholder URL
-      emit('start_presenting', { 
-        room_id: roomId, 
-        user_id: user.id, 
-        content_url: 'presentation' 
-      });
-    }
-  }, [isPresenting, emit, roomId, user]);
 
   const sendMessage = useCallback((content) => {
     emit('send_message', {
@@ -202,12 +164,17 @@ const ClassroomPage = () => {
     });
   }, [emit, roomId, user]);
 
-  const muteAll = useCallback(() => {
-    if (isTeacher) {
-      emit('mute_all', { room_id: roomId, host_id: user.id });
-      toast.success('All students muted');
+  const handleMuteAll = useCallback(async () => {
+    if (!isTeacher) return;
+    
+    try {
+      const response = await axios.post(`${API}/rooms/${roomId}/mute-all`);
+      toast.success(`Muted ${response.data.muted_count} audio tracks`);
+    } catch (error) {
+      console.error('Failed to mute all:', error);
+      toast.error('Failed to mute all students');
     }
-  }, [isTeacher, emit, roomId, user]);
+  }, [isTeacher, roomId]);
 
   const leaveRoom = useCallback(() => {
     navigate('/dashboard');
@@ -217,71 +184,97 @@ const ClassroomPage = () => {
     if (isTeacher) {
       try {
         await axios.delete(`${API}/rooms/${roomId}`);
+        navigate('/dashboard');
       } catch (error) {
         console.error('Failed to end room:', error);
       }
     }
-  }, [isTeacher, roomId]);
+  }, [isTeacher, roomId, navigate]);
 
   if (loading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-slate-950">
-        <div className="text-sky-400 font-heading text-xl animate-pulse">
-          Entering Classroom...
+        <div className="text-center">
+          <div className="w-12 h-12 border-2 border-sky-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <div className="text-sky-400 font-heading text-xl">
+            Entering Classroom...
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen w-screen bg-slate-950 overflow-hidden relative" data-testid="classroom-page">
-      {/* 3D Scene (Background) */}
-      <div className="absolute inset-0 z-0">
-        <ClassroomScene 
-          participants={participants}
-          smartboardContent={smartboardContent}
-          currentUserId={user?.id}
-        />
-      </div>
+    <div className="h-screen w-screen bg-slate-950 overflow-hidden flex flex-col" data-testid="classroom-page">
+      {/* Header */}
+      <RoomHeader 
+        room={room}
+        isTeacher={isTeacher}
+        participantCount={participants.length}
+        onEndRoom={endRoom}
+      />
 
-      {/* UI Layer */}
-      <div className="relative z-10 h-full flex flex-col pointer-events-none">
-        {/* Header */}
-        <RoomHeader 
-          room={room}
-          isTeacher={isTeacher}
-          participantCount={participants.length}
-          onEndRoom={endRoom}
-        />
-
-        {/* Middle section - Participants panel */}
-        <div className="flex-1 flex justify-end p-4 overflow-hidden">
-          <ParticipantsPanel 
-            participants={participants}
+      {/* Main content area */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Video area */}
+        <div className="flex-1 flex flex-col relative">
+          <LiveKitVideo
+            token={livekitToken}
+            serverUrl={livekitUrl}
+            teacherId={room?.host_id}
             currentUserId={user?.id}
-            isTeacher={isTeacher}
-            onMuteAll={muteAll}
+            onLeave={leaveRoom}
+            onMuteAll={handleMuteAll}
           />
+
+          {/* Floating controls for students */}
+          {!isTeacher && (
+            <div className="absolute bottom-24 left-1/2 -translate-x-1/2 flex gap-3">
+              <Button
+                onClick={toggleHand}
+                className={`
+                  px-4 py-2 rounded-full transition-all duration-200
+                  ${isHandRaised 
+                    ? 'bg-yellow-500/30 text-yellow-400 border border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.3)]' 
+                    : 'bg-slate-800/50 text-slate-400 border border-slate-700 hover:bg-slate-700/50'}
+                `}
+                data-testid="raise-hand-btn"
+              >
+                <Hand className="w-4 h-4 mr-2" strokeWidth={1.5} />
+                {isHandRaised ? 'Lower Hand' : 'Raise Hand'}
+              </Button>
+            </div>
+          )}
         </div>
 
-        {/* Control Bar */}
-        <ControlBar
-          isMuted={isMuted}
-          isVideoOn={isVideoOn}
-          isHandRaised={isHandRaised}
-          isPresenting={isPresenting}
-          isTeacher={isTeacher}
-          isChatOpen={isChatOpen}
-          onToggleMute={toggleMute}
-          onToggleVideo={toggleVideo}
-          onToggleHand={toggleHand}
-          onTogglePresent={togglePresent}
-          onToggleChat={() => setIsChatOpen(!isChatOpen)}
-          onLeave={leaveRoom}
-        />
+        {/* Side panel */}
+        {isPanelOpen && (
+          <div className="w-80 flex flex-col border-l border-slate-800 bg-slate-950/50">
+            <ParticipantsPanel 
+              participants={participants}
+              currentUserId={user?.id}
+              isTeacher={isTeacher}
+              onMuteAll={handleMuteAll}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Chat Panel (Overlay) */}
+      {/* Chat toggle */}
+      <Button
+        onClick={() => setIsChatOpen(!isChatOpen)}
+        className={`
+          fixed bottom-6 right-6 w-12 h-12 rounded-full z-40
+          ${isChatOpen 
+            ? 'bg-sky-500/20 text-sky-400 border border-sky-500/50' 
+            : 'bg-slate-800/50 text-slate-400 border border-slate-700 hover:bg-slate-700/50'}
+        `}
+        data-testid="chat-toggle-floating"
+      >
+        <MessageSquare className="w-5 h-5" strokeWidth={1.5} />
+      </Button>
+
+      {/* Chat Panel */}
       <ChatPanel
         isOpen={isChatOpen}
         messages={messages}
