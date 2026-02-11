@@ -161,7 +161,7 @@ def create_livekit_token(room_name: str, participant_identity: str, participant_
     )
     
     token.with_grants(grant)
-    token.with_ttl(datetime.timedelta(hours=6))  # 6 hour validity
+    token.with_ttl(timedelta(hours=6))  # 6 hour validity
     
     return token.to_jwt()
 
